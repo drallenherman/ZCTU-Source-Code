@@ -1,0 +1,1967 @@
+##############################################################
+# ZassConj Unit Construction Source Code
+# By Allen Herman, Alexander Konovalov, and Gurmail Singh
+# HeLP package Translation and Aut(G)-orbit reduction 
+# By Andreas Bachle and Leo Margolis 
+# This GAP code has three main purposes: 
+#  1. An implementation of the LP method 
+#  2. Implementation of Theoretical Sieves and Quotient method
+#  3. Implementation of the Partially Central Unit Construction
+#  4. FindZCCriticalGroups(n) - the main function
+##############################################################
+#
+# Part One: Implementation of the LP method ***************
+# Note that this is independent of the HeLP GAP package.
+# Its output is in a different format, it does not check the 
+# Cohn-Livingstone and power congruence criteria.
+# The modular character check functions appear after the 
+# ordinary charcter ones.
+#   
+##############################################################
+
+MyReducedGroebnerBasis := ReducedGroebnerBasis;
+
+#if LoadPackage("singular") = true then
+# if Filename(DirectoriesSystemPrograms(),"Singular") <> fail then
+#   Read("singular.g");
+# fi;
+#fi;
+
+DeclareInfoClass("InfoTorsion");
+SetInfoLevel(InfoTorsion,1);
+
+############################################################################
+LoadPackage("wedderga");
+LoadPackage("RepSn");
+############################################################################
+
+############################################################################
+#
+# The first argument is a string with a valid GAP command to create the 
+# group (without semicolon), and the 2nd argument is a string with the
+# name of the character table. If both strings are the same, it's suffient
+# to use the 1-argument version. For example,
+# GroupWithCharacterTable( "PSL(2,7)" );
+# G:=GroupWithCharacterTable( "AlternatingGroup(6)", "A6" );
+# G:=GroupWithCharacterTable( "PSL(2,9)", "A1(9)" );
+#
+GroupWithCharacterTable:=function( arg )
+local G,t,t1,groupname,tablename;
+groupname := arg[1];
+if Length(arg) = 1 then
+  tablename := arg[1];
+elif Length(arg) = 2 then
+  tablename := arg[2];
+else
+  Error("1 or 2 arguments required");
+fi;    
+G:=EvalString( groupname );
+t:=CharacterTable( tablename );
+t1:=CharacterTableWithStoredGroup(G,t);
+if t1 <> fail then
+  return G;
+else
+  return fail;
+fi;   
+end;
+
+############################################################################
+# F is Fourier Matrix for unit of order k
+# Multiplies the row vector Mu on right
+############################################################################
+FourierMatrixOrderK:=function(k)
+
+local i,j,F;
+
+F:=[];
+
+for i in [1..k] do 
+  F[i]:=[];
+  for j in [1..k] do 
+    F[i][j]:=E(k)^((i-1)*(j));
+  od;
+od;
+
+return F;
+end;
+
+
+############################################################################
+CasesZassConjOrderK:=function(G,k)
+local T,O,h,D,d,i,c0,c1,t;
+
+T:=CharacterTable(G);
+O:=OrdersClassRepresentatives(T);
+h:=Length(O);
+
+D:=DivisorsInt(k);
+
+c0:=[];
+for i in [1..h] do 
+  c0[i]:=[i,O[i]]; # [ number of the class, order of class representative ]
+od; 
+
+c1:=[];
+for d in D do 
+  if d>1 and d<k then 
+    t:=Length(c1);
+    c1[t+1]:=[];
+    c1[t+1][1]:=d;
+    c1[t+1][2]:=[];
+    for i in [1..h] do
+      if c0[i][2]=d then 
+        Add(c1[t+1][2],i);
+      fi;
+    od;
+  fi;
+od;
+
+return c1;
+end;
+
+############################################################################
+ChiVectorCaseCOrderK:=function(G,s,c,k)
+local chi,T,O,h,I,i,D,d,M,v,j,L2,l;
+
+chi:=ValuesOfClassFunction(Irr(G)[s]);
+T:=CharacterTable(G);
+O:=OrdersClassRepresentatives(T);
+h:=Length(O);
+
+I:=[];
+for i in [1..h] do 
+  I[i]:=[];
+  I[i][1]:=Indeterminate(Rationals,i);
+od;
+
+D:=DivisorsInt(k);
+
+M:=[];
+for i in [1..h] do 
+  if O[i] in D and O[i]>1 then 
+    Add(M,chi[i]);
+  else
+    Add(M,0);
+  fi;
+od;
+
+v:=[];
+for i in [1..(k-1)] do 
+  if Gcd(i,k)=1 then 
+    v[i]:=AsList(GaloisCyc(M,i)*I)[1];
+  else
+    d:=Order(E(k)^i);
+    if i=k/d then 
+      for j in [1..Length(c)] do 
+        if c[j][1]=d then 
+          v[i]:=chi[c[j][2][1]];
+          break;
+        fi;
+      od; 
+    else 
+      l:=i/(k/d);   
+      v[i]:=GaloisCyc(v[k/d],l);
+    fi;
+  fi;
+od;
+v[k]:=chi[1];
+
+return v;
+end;
+
+
+############################################################################
+CasesListOrderK:=function(G,k)
+local C,a,b,i,j,C1,C2,d,L,L1,c;
+C:=CasesZassConjOrderK(G,k);
+
+if Length(C)=0 then 
+
+  C1:=[[]];
+
+else
+
+  a:=[];
+  for i in [1..Length(C)] do 
+    a[i]:=[];
+    for j in [1..Length(C[i][2])] do
+      Add(a[i],[[C[i][1],[C[i][2][j]]]]);
+    od;
+  od;
+
+  C1:=a[1];
+  C2:=[];
+  if Length(a)>1 then 
+    for i in [2..Length(C)] do 
+      for c in [1..Length(C1)] do 
+        for j in [1..Length(a[i])] do 
+          b:=Concatenation(C1[c],a[i][j]);
+          Add(C2,b);
+        od;
+      od;
+      C1:=C2;
+      C2:=[];
+    od;
+  fi;
+fi;
+
+return C1;
+end;
+
+
+######################################################################
+######
+LPExprnsForChiOrderK:=function(G,s,k)
+local C,F,h,L,i,j,c,B,V,F1,M1,M2,M3;
+
+C:=CasesListOrderK(G,k);
+F:=FourierMatrixOrderK(k);
+h:=Size(Irr(G));
+F1:=F^(-1);
+L:=[];
+c:=Length(C);
+
+M1:=[];
+for i in [1..c] do 
+  Add(M1,ChiVectorCaseCOrderK(G,s,C[i],k));
+od;
+M2:=[];
+M2:=SSortedList(M1);
+M3:=[];
+for i in [1..Length(M2)] do 
+  Add(M3, M2[i]*F1);
+od;
+
+for i in [1..c] do 
+for j in [1..Length(M2)] do if
+M2[j]=M1[i] then 
+Add(L,[C[i],M3[j]]);
+fi;od;od;
+
+return L;
+end;
+
+
+############################################################################
+MuVecsForChiOrderK:=function(G,s,k)
+local chi,F,n,P1,p,P,q,Mu,i,j,w;
+
+chi:=ValuesOfClassFunction(Irr(G)[s]);
+F:=Field(chi);
+n:=chi[1];
+P1:=RestrictedPartitions(n,[0..n],k);
+Mu:=[];
+
+for p in P1 do 
+  P:=PermutationsList(p);
+  for q in P do 
+    w:=0;
+    for i in [1..k] do 
+      if q[i]>0 then 
+        for j in [1..q[i]] do 
+          w:=w+E(k)^(i-1);
+        od;
+      fi;
+    od; 
+    if w in F then
+      Add(Mu,q);
+    fi;
+  od;
+od;
+
+return Mu;
+end;
+
+############################################################################
+CalcEigs:=function(L,k)
+local D,l,i,j;
+
+D:=[];
+l:=Size(L);
+for i in [1..l] do 
+  if L[i]>0 then 
+    for j in [1..L[i]] do
+      D[i]:=E(k)^(i-1);
+    od; 
+  fi;
+od; 
+
+return D; 
+end;
+
+
+############################################################################
+#
+# Main function: Output is the Luthar-Passi solutions for order k
+#
+#################################################################
+ZCForGOrderK:=function(G,k)
+local h,S,C,C1,c,j,i,D2,I,L,B,b,M,m,A,B1,B2,D,d,z,T,t,j1,T1,
+      f,g,f1,n1,t1,U,U1,V,i1,V1,success, pos, pos2, charord;
+
+h:=Size(Irr(G));
+C:=CasesListOrderK(G,k);
+c:=Size(C);
+Print("Order ",k,": ",c," cases\n");
+V:=[];
+success:=true;
+
+# find the position of the trivial character
+pos:=PositionProperty(Irr(G),j -> ForAll(ValuesOfClassFunction(j),IsOne));
+pos2:=[1..h];
+RemoveSet(pos2,pos);
+SortParallel( List( pos2, j -> DegreeOfCharacter(Irr(G)[j])), pos2);
+charord:=Concatenation([pos],pos2);
+# now charord starts with the position of the trivial character
+# and then positions of other characters by acsending degree
+
+for j in [1..c] do
+  Print("Case ", j, "/", c, ":", C[j],"\n");
+  S:=[];
+  U:=[];
+  ###### chi-1(g) is the trace of the identity so Mu vector is known, gives 
+  # augmentation polynomial. 
+  S[1]:=[];
+  U[1]:=[];
+  L:=LPExprnsForChiOrderK(G,1,k);
+  B:=L[j][2];
+  M:=MuVecsForChiOrderK(G,1,k);
+  m:=Length(M);
+  A:=B-M[m];
+  D:=Filtered( A, b -> not IsZero(b) );
+  B1:=MyReducedGroebnerBasis(D,MonomialLexOrdering());
+  S[1][1]:=B1;
+  U[1][1]:=[M[m]];
+  ###### for other chi-i's all Mu vectors must be considered
+  for i in [2..Length(charord)] do
+    Info(InfoTorsion, 2, "Considering character ", charord[i], " of ", h); 
+    S[i]:=[];
+    U[i]:=[];
+    L:=LPExprnsForChiOrderK(G,charord[i],k);
+    B:=L[j][2];
+    M:=MuVecsForChiOrderK(G,charord[i],k);
+    for m in [1..Length(M)] do 
+      # Print("m = ", m, "/", Length(M), "\n");
+      A:=B-M[m];
+      D:=Filtered(A, b -> not IsZero(b));
+      t:=Length(S[i-1]);
+      for b in [1..t] do 
+        T:=MyReducedGroebnerBasis(Concatenation(S[i-1][b],D),MonomialLexOrdering()); 
+        if not(IsConstantRationalFunction(T[1])) then 
+          Add(S[i],T);
+          Add(U[i],Concatenation(U[i-1][b],[M[m]])); 
+        fi;
+      od; 
+    od;
+  od;
+  for i in [1..Length(S[h])] do 
+    U1:=[];
+    for f in S[h][i] do 
+      f1:=ExtRepNumeratorRatFun(f);
+      t1:=Length(f1);
+      for j1 in [1..(t1-1)] do 
+        if f1[j1]=[] then  
+          Add(U1,f1[j1+1]); 
+        fi; 
+      od; 
+    od; 
+    if ForAll(U1,IsInt) then 
+      Add(V,[-U1,C[j],[S[h][i],U[h][i]]]);
+      Print(-U1,[S[h][i],U[h][i]],"\n");
+    fi; 
+  od;
+  for T in S[h] do 
+    for f in T do 
+      f1:=ExtRepNumeratorRatFun(f);
+      t1:=Length(f1); 
+      for n1 in [1..(t1-1)] do 
+        if f1[n1] in Integers then 
+          if not f1[n1] in [0,-1] then 
+            success:=false;
+            break;
+          fi;
+        fi;
+      od;
+    od;
+  od;     
+od;
+
+if success then 
+  Info(InfoTorsion, 1, "LP Method Verifies ZC for order ", k); 
+  return rec( data:=[], result:=true);
+else
+
+V1:=[];
+for i1 in [1..Length(V)] do 
+  S:=[];
+  M:=V[i1][3][1];
+ for i in [1..Length(M)] do 
+  f:=ExtRepNumeratorRatFun(M[i]); 
+  if f[1]=[] then 
+    Add(S,[f[3][1],-f[2]]); 
+  fi; 
+ od; 
+Add(V1,[S,V[i1][2],V[i1][3][2]]);
+od; 
+
+  Info(InfoTorsion, 1, "LP Method fails for order ", k); 
+  return rec( data:=V1, result:=false );
+fi;
+end;
+
+
+############################################################################
+ZCForGAllOrders:=function(G)
+local z0,k,z,c,ords;
+# if G is solvable, then orders of torsion units are orders of elements of G
+# (see Hertweck, http://arxiv.org/abs/math/0703541)
+if IsSolvable(G) then
+  ords := List( ConjugacyClasses(G), c -> Order(Representative(c) ) );
+else
+  ords := DivisorsInt( Exponent(G) );
+fi;
+ords := Set( Filtered( ords, k -> k <> 1 ) );
+ 
+z0 := true;
+for k in ords do 
+  z := ZCForGOrderK(G,k);
+  if z.result <> true then 
+    z0 := false;
+  fi;
+od; 
+return z0;
+end;
+###########################################################
+# To perform Brauer Character check of a single PA list V
+# arising from ZCForGOrderK(G,k); 
+# T should be an ordinary character table of the nonsolvable group G 
+# obtained from the GAP library that can be reduced modulo
+# the prime p, returns false if the list fails the test, 
+# returns true if the PA list passes the test. 
+#########################################################
+MuVecsForBrauerCheck:=function(phi,k)
+local P,p,Mu,t,n,i,P1,q,v;
+
+n:=phi[1];
+P1:=RestrictedPartitions(n,[0..n],k);
+Mu:=[];
+
+t:=0;
+v:=[]; 
+for i in [1..Length(phi)] do 
+  v[i]:=1;
+od; 
+if phi=v then  
+   t:=1;
+fi; 
+
+if t=1 then 
+  Mu[1]:=Reversed(P1[1]); 
+else 
+for p in P1 do 
+  P:=PermutationsList(p);
+  for q in P do
+      Add(Mu,q);
+  od;
+od;
+fi; 
+
+return Mu;
+end;
+
+##########################################
+# V is one list from ZCForGOrderK(G,k).data  
+# V[1] gives nontrivial partial augmentation list for u, 
+# V[2] is case information for powers of u, 
+# V[3][1] is polynomial data, V[3][2] gives spectrum
+##########################################
+#
+# To create G, use `GroupWithCharacterTable` to ensure that 
+# conjugacy classes are properly identified
+#
+HeLPBrauerCharacterCheckAtP:=function(G,k,p,V)
+local T0,T1,phi,ibr,R,C0,C1,F,f,v,b,K,r,c0,c1,d,i,j,p0,p1,p2,g,Mu,m,m1,t; 
+
+T0:=CharacterTable(G);
+T1:=T0 mod p; 
+ibr:=Irr(T1); #irreducible Brauer characters
+C0:=ClassNames(T0);
+C1:=ClassNames(T1);
+F:=FourierMatrixOrderK(k);
+R:=true;
+
+f:=[];
+for v in V[3][1] do 
+  Add(f,ExtRepNumeratorRatFun(v)); 
+od; 
+
+for j in [1..Length(ibr)] do 
+  phi:=ibr[j];
+  
+  b:=[];
+  K:=[0..(k-1)];
+  for r in K do 
+    b[r+1]:=0;
+    if r=0 then 
+      b[r+1]:=phi[1];
+    elif r=1 then 
+      for p0 in f do 
+        if Length(p0)>2 then 
+        p1:=(-1)*p0[2];
+        c0:=C0[p0[3][1]]; 
+        for c1 in C1 do 
+          if c1=c0 then 
+            p2:=phi[Position(C1,c1)];
+          fi;
+        od; 
+        b[r+1]:=b[r+1]+p1*p2;
+        fi; 
+      od;
+    elif Gcd(r,k)=1 then 
+      b[r+1]:=GaloisCyc(b[2],r); 
+    elif IsInt(k/r) then 
+      for d in V[2] do 
+        if d[1]=k/r then 
+          c0:=C0[d[2][1]]; 
+          for c1 in C1 do 
+            if c1=c0 then 
+              p2:=phi[Position(C1,c1)]; 
+            fi; 
+          od; 
+        fi;
+      od; 
+      b[r+1]:=p2; 
+    else 
+      g:=Gcd(r,k); 
+      b[r+1]:=GaloisCyc(b[g+1],r/g); 
+    fi;
+  od;   
+
+  Mu:=MuVecsForBrauerCheck(phi,k);
+  t:=0;
+  for m in Mu do         
+    m1:=m*TransposedMat(F); 
+    if m1=b then   
+      t:=1;
+      Print(b, " ", t,"\n");
+    fi; 
+  od; 
+  if t=0 then
+    Print(b, " ", t,"\n");
+  fi;  
+  if t <> 1 then 
+    R:=false; 
+  fi; 
+od;
+
+# returns true if PA list passes the Brauer table tests and false, 
+# if it fails (i.e. there is no unit with such PA list)
+return R;
+end; 
+##########################################################
+#
+#  Part 1(b): The HeLP package solver function optimized for 
+#  units of p-power order.
+#
+##########################################################
+LoadPackage("help");
+
+HeLPWithSolverChange := function(G)
+local C, n;
+
+SetInfoLevel(HeLP_Info,0);
+n := Order(G);
+C := CharacterTable(G);
+HeLP_Solver("4ti2");
+for d in DivisorsInt(n) do
+  if IsPrimePowerInt(n) then
+    HeLP_WithGivenOrder(C, n);;
+  fi;
+od;
+HeLP_Solver("normaliz");
+return HeLP_AllOrders(C);
+end;
+
+
+
+####################################################
+#
+# Part Two: Theoretical Sieve and Quotient Method Functions
+#
+################################################################
+# The first function is the main theoretical sieve. 
+################################################################
+BadCasesForZC:=function(n)
+local G,m,S1,S2,S3,P,i,j,F,p,t,N,n1,n2;
+
+m:=NrSmallGroups(n);
+S1:=[];
+S2:=[];
+for i in [1..m] do 
+  G:=SmallGroup(n,i);
+  if not(IsNilpotent(G)) and not(IsCyclic(DerivedSubgroup(G))) then 
+    Add(S1,i);
+  fi; 
+od;
+F:=Factors(n); 
+for i in S1 do 
+  G:=SmallGroup(n,i);
+  t:=0;
+  for p in F do 
+  if IsPrimeInt(p) then 
+    P:=SylowSubgroup(G,p); 
+    if IsNormal(G,P) and IsAbelian(FactorGroup(G,P)) then 
+      t:=1;
+      break; 
+    fi;
+  fi;
+  od; 
+  if t=0 then 
+    Add(S2,i); 
+  fi; 
+od; 
+
+S3:=[];
+for i in S2 do 
+  G:=SmallGroup(n,i);
+  t:=1;
+  N:=NormalSubgroups(G); 
+  for n1 in N do 
+    if Size(n1)=2 then 
+      for n2 in N do 
+        if Size(Intersection(n1,n2))=1 and Size(n2)=Size(G)/2 then 
+          t:=0; 
+        fi; 
+      od; 
+    fi; 
+  od; 
+  if t=1 then 
+    Add(S3,i); 
+  fi; 
+od;
+
+return S3; 
+end;
+#################################################################
+# The next two functions remove nilpotent-by-nilpotent cases 
+# from the nontrivial HeLP+-solution list. 
+#################################################################
+IsNilpotentByNilpotent := function(G)
+if IsNilpotent(G/FittingSubgroup(G)) then
+  return true;
+else
+return false;
+fi;
+end;
+#############################################################
+SetPATrivial := function(n)
+local i;
+for i in [1..Size(HeLP_sol[n])] do
+  if not IsSubset([0,1], Set(Flat(HeLP_sol[n][i]))) then
+    Unbind(HeLP_sol[n][i]);
+  fi;
+od;
+HeLP_sol[n] := DuplicateFreeList(HeLP_sol[n]);
+end;
+#############################################################
+ApplyNilpotentByNilpotent := function(G, HeLP_sol)
+local C, i;
+
+C := CharacterTable(G);
+if IsNilpotent(G/FittingSubgroup(G)) then
+  for i in [2..Size(G)] do  
+    if IsBound(HeLP_sol[i]) then 
+      if Size(PrimeDivisors(i)) = 1 then
+        SetPATrivial(i);
+      fi;
+    fi;
+  od;
+fi;
+end;
+
+###############################################################
+# The next function checks the lower central series criterion.
+##############################################################
+CheckLCS := function(G)
+local L, U, Ps, p, Res;
+
+L := LowerCentralSeries(G);
+U := L[Size(L)];
+Ps := PrimeDivisors(Order(U));
+for p in Ps do
+  if Order(G) mod p^4 = 0 then
+    return false;
+  fi;
+od;
+return true;
+end;
+###############################
+IsMetabelian := function(G)
+local LN, N;
+
+LN := NormalSubgroups(G);
+for N in LN do
+  if IsAbelian(N) and IsAbelian(G/N) then
+    return true;
+  fi;
+od;
+return false;
+end;
+################################################################
+# The next function is used to reduce to the distinct
+# Aut(G)-orbits of nontrivial HeLP solutions
+# arg = [ CharacterTable(G), k, HeLP_sol[k] ]; 
+# where the last part is the output of HeLP_ZC(G) for order k 
+###############################################################
+
+AutOrbs := function( arg )
+local C, ord, sols, G, Conj, A, I, rep, classes, images, a, pos, ocr, classnames, orignames, orbit, solorbits, perms, s, pis, res;
+C := arg[1];
+ord := arg[2];
+if Size(arg) > 2 then
+  sols := arg[3];
+  solorbits := [];
+fi;
+G := UnderlyingGroup(C);
+Conj := ConjugacyClasses(C);;
+ocr := OrdersClassRepresentatives(C);
+A := AutomorphismGroup(G);
+I := InnerAutomorphismsAutomorphismGroup(A);;
+rep := RightTransversal(A, I);
+
+if ord = 1 then                # case ord = 1
+  if Size(arg) = 2 then
+    return [ [ [ [ "1a" ] ], "->", [ [ "1a" ] ] ] ];
+  fi;
+  if Size(arg) = 3 then
+    return [ [ [ 1 ] ] ];
+  fi;
+fi;
+                               # all other cases
+pos := List(Difference(DivisorsInt(ord), [1]), 
+       d -> Flat(List(Difference(DivisorsInt(d), [1]), e -> Positions(ocr, e))));
+
+classes := List(pos, k -> List(Conj{k}, cl -> Representative(cl)));
+images := [];
+for a in rep do
+  Add(images, List(classes, k -> List(k,  c -> PositionProperty(Conj, cl -> c^a in cl))));
+od;
+images := Set(images);
+if Size(arg) = 2 then
+  classnames := ClassNames(C);
+  orignames := List(pos, k -> classnames{k});
+  return List(images, k -> [orignames, "->", List(k, cl -> classnames{cl})]);
+fi;
+if Size(arg) = 3 then
+  perms := List(images, k -> List([1..Size(k)], d -> PermListList(pos[d], k[d])));
+  while sols <> []  do
+    s := sols[1];
+    Add(solorbits, s);
+    orbit := [];
+    for pis in perms do
+      res := List([1..Size(s)], j -> Permuted(s[j], pis[j]));
+      Add(orbit, res);
+    od;
+    sols := Difference(sols, orbit);
+  od;   
+  return solorbits;
+fi;
+end;
+########################################################################
+# The next function translates for the list of Aut(G)-orbits of solutions
+########################################################################
+TranslateHeLP_solToOrbits := function(C, L)
+local d, Res;
+
+Res := [ ];
+for d in [1..Size(L)] do 
+  if IsBound(L[d]) then
+    Res[d] := AutOrbs(C, d, L[d]);
+  fi;
+od;
+return Res;
+end;
+
+
+###############################################################
+TranslatePAForQuotientMethod := function(C, k, PA)
+local Pos, L, i;
+
+Pos := HeLP_INTERNAL_PositionsInCT(C, k)[Size(PA)];
+L := [ ];
+for i in [1..Size(Pos)] do
+  if PA[Size(PA)][i] <> 0 then
+    Add(L, [Pos[i], PA[Size(PA)][i]]);
+  fi;
+od;
+return L;
+end;
+################################################################
+# The next function applies the quotient method to the output of 
+# a single LP solution in the format of ZCForGOrderK or 
+# TranslationFromHeLP
+################################################################
+QuotientMethod:=function(G,V)
+local t,N,cc,S,M,i,f,n,j,phi,F,cc1,S1,S2,S3,s,g,k,t1,t2;
+
+t1:="Quotient Method fails to resolve ZC";
+N:=NormalSubgroups(G); 
+cc:=ConjugacyClasses(G); 
+S:=V[1];
+
+if Length(S)>1 then 
+ 
+for n in N do 
+  if Size(n)<Size(G) and 1<Size(n) then 
+  phi:=NaturalHomomorphismByNormalSubgroup(G,n); 
+  F:=Image(phi);
+  cc1:=ConjugacyClasses(F);
+  S1:=[];
+  for j in [1..Length(S)] do  
+   g:=Representative(cc[S[j][1]]);
+   k:=Position(cc1,ConjugacyClass(F,Image(phi,g)));
+   Add(S1,[k,S[j][2]]);
+  od; 
+
+  S2:=[]; 
+    for j in [1..Length(S1)] do 
+     if j=1 then Add(S2,S1[j]); fi; 
+     if j>1 then 
+       t:=0;
+       for k in [1..Length(S2)] do  
+        if S1[j][1]=S2[k][1] then S2[k][2]:=S2[k][2]+S1[j][2]; t:=1; fi; 
+       od; 
+       if t=0 then Add(S2,S1[j]); fi; 
+     fi;
+    od; 
+
+  S3:=[];
+  for j in [1..Length(S2)] do 
+    if not(S2[j][2]=0) then Add(S3,S2[j]); fi; 
+  od;  
+
+  if Size(S3)>1 then 
+   t1:="ZC Resolved by Quotient Method"; 
+   break; 
+  fi;
+ fi;
+od;
+
+else
+t1:="Unit is already trivial"; 
+fi; 
+
+t2:=true;
+if t1="Quotient Method fails to resolve ZC" then 
+  t2:=false; 
+fi;
+
+return t2; 
+end;
+############################################################
+# Function to apply Quotient Method to LP output of a group 
+############################################################
+QuotientMethodForG:=function(G,L)
+local t,i,V,q; 
+
+t:=true; 
+for i in [1..Length(L)] do 
+  V:=L[i];
+  q:=QuotientMethod(G,V); 
+  if q=false then 
+     t:=false; 
+     Print(i,V[1]," false","\n"); 
+  fi; 
+od; 
+
+return t; 
+end; 
+################################################################
+#
+# Part Three: Unit Construction and Partially Central Check 
+#
+################################################################
+# Part 3(a): The first collection of functions constructs a unit # from its spectrum at each irreducible representation
+#################################################################
+FieldOfRealization:=function(I)
+local B1,B2,M,F,f,f1,i,j;
+
+B1:=[];
+B2:=[];
+M:=GeneratorsOfGroup(Image(I)); 
+F:=Rationals; 
+
+for i in [1..Size(M)] do 
+for j in [1..Length(M[1][1])] do 
+ f:=PrimitiveElement(Field(M[i][j])); 
+ if not(f in F) then 
+   f1:=PrimitiveElement(F);
+   F:=Field([f,f1]);
+ fi; 
+od; 
+od;
+
+return F;
+end;
+
+#################################################################
+BasisSubsetOfSpanningSet:=function(F,B)
+local S,B1,B2,i,b,n,V1; 
+
+S:=B[2];
+n:=Dimension(VectorSpace(F,S));
+# n:=Size(S); 
+B1:=[B[1][1]];
+B2:=[S[1]];
+V1:=VectorSpace(F,B2);
+for i in [2..Size(S)] do 
+  if not(S[i] in V1) then
+    Add(B1,B[1][i]); 
+    Add(B2,S[i]); 
+    V1:=VectorSpace(F,B2);
+  fi; 
+od; 
+
+B2:=Basis(V1,B2);
+
+return [B1,B2];
+end;
+
+#################################################################
+QBasisOfImageOfIrrepOfG:=function(G,I,chi)
+local n,F,t,B1,B2,B3,b,i,V,g;
+
+B1:=[];
+n := DegreeOfCharacter(chi);
+F:=Field(chi);
+t:=Trace(F,Rationals,1);
+
+V := VectorSpace(Rationals, [ NullMat( n, n ) ]);
+B2:=[];
+
+for i in [1..Size(G)] do
+  if InfoLevel(InfoTorsion) > 1 then Print(i,"\r"); fi;
+  g := Image(I,Elements(G)[i]);
+  if not g in V then
+    Add(B2, g);
+    Add(B1, i);
+    V := VectorSpace(Rationals,B2); 
+    if Length(B1)=t*n^2 then
+      break;
+    fi;
+  fi;
+od;
+
+B3 := List( B1, i -> Elements(G)[i] );
+
+return [B3,B2];
+end; 
+
+############################################################################
+ZBasisOfImageOfChi:=function(G,I,B0)
+local n,g,F,L1,t,k,B1,B2,B3,B4,b,i,V,j,j1,j2,h,L,h1,h2,H,v,d,d1,d2,r1,r2,m,S1,S2,H1;
+
+H1:=GeneratorsOfGroup( Image(I) );
+H := ShallowCopy( H1 );
+for h1 in H1 do 
+  for h2 in H1 do 
+    Add(H,h1*h2);
+  od; 
+od;
+
+g:=Elements(G);
+
+B2:=B0[2];
+V:=VectorSpace(Rationals,B2);
+B3:=BasisNC(V,B2);
+
+for i in [1..Size(G)] do 
+  if InfoLevel(InfoTorsion) > 1 then Print(i,"\r"); fi;
+  h:=Image(I,g[i]);
+  L:=Coefficients(B3,h);
+  if not ForAll(L,IsInt) then
+    # d1 is the largest demoninator
+    d1:=1;
+    S1:=[];
+    for j1 in [1..Size(B2)] do
+      if not(L[j1]=0) then 
+        d2:=DenominatorRat(L[j1]);
+        if d2>d1 then  
+          d1:=d2;
+        fi;
+      fi;
+    od;
+    # find positions having the largest denominator 
+    for j1 in [1..Size(B2)] do 
+      if DenominatorRat(L[j1])=d1 then 
+        Add(S1,j1);
+      fi;
+    od;
+    r1:=AbsoluteValue(NumeratorRat(L[S1[1]]));
+    S2:=[];
+    # find the last position of the smallest absolute value of the
+    # numerator among those having the largest denominator
+    for j1 in [1..Size(S1)] do  
+       r2:=AbsoluteValue(NumeratorRat(L[S1[j1]]));
+       if not(r2>r1) then 
+         Add(S2,S1[j1]); 
+       fi;
+    od; 
+    k:=S2[Size(S2)];
+    Remove(B2,k); 
+    Add(B2,h); 
+    B3:=BasisNC(V,B2);
+  fi;    
+od; 
+
+B1:=[];
+for h in B2 do
+  Add(B1,PreImagesRepresentative(I,h)); 
+od;
+
+return [B1,B3];
+end; 
+
+############################################################################
+# The next function uses input B:=B0, where B0 is the result of 
+# QBasisOfImageOfIrrepOfG(G,I,chi)
+############################################################################
+CBasisOfImageOfIrrepOfG:=function(G,I,B)
+local B1,F;
+
+F:=FieldOfRealization(I); 
+B1:=BasisSubsetOfSpanningSet(F,B); 
+
+return B1; 
+end; 
+
+############################################################################
+OrderKCompanionMatrixFromSpectrum:=function(L)
+local k,n,x,i,j,A,A1,p,f;
+
+n:=Sum(L);
+k:=Length(L);
+x:=Indeterminate(Rationals,1);
+p:=1;
+A:=[];
+if L[1]>0 then 
+  A:=IdentityMat(L[1]); 
+fi;
+if L[1]<n then  
+  for i in [2..k] do 
+    if L[i]>0 then 
+      if E(k)^(i-1)=-1 then 
+        A1:=(-1)*IdentityMat(L[i]); 
+        A:=DirectSumMat(A,A1); 
+      else
+        p:=p*(x-E(k)^(i-1))^L[i];
+      fi; 
+    fi;
+  od;
+  A1:=CompanionMat(p);
+  A:=DirectSumMat(A,A1);
+fi;
+
+# if Length(f)>1 then
+# for j in [2..Length(f)] do 
+#  A:=DirectSumMat(A,CompanionMat(f[j])); 
+# od; 
+# fi;
+
+return A;
+end;
+
+############################################################################
+OrderKFactoredCompanionMatrixFromSpectrum:=function(L)
+local k,n,x,i,j,A,p,f;
+
+n:=Sum(L);
+k:=Length(L);
+x:=Indeterminate(Rationals,1);
+p:=1;
+for i in [1..k] do 
+  if L[i]>0 then 
+    p:=p*(x-E(k)^(i-1))^L[i]; 
+  fi; 
+od;
+f:=Factors(p);
+A:=CompanionMat(f[1]);
+if Length(f)>1 then
+  for j in [2..Length(f)] do 
+    A:=DirectSumMat(A,CompanionMat(f[j])); 
+  od; 
+fi;
+
+return A;
+end;
+
+############################################################################
+OrderKDiagonalMatrixFromSpectrum:=function(L)
+local k,n,i,j,A,D; 
+
+n:=Sum(L);
+k:=Length(L);
+D:=[];
+for i in [1..k] do 
+  if L[i]>0 then 
+   for j in [1..L[i]] do 
+     Add(D,E(k)^(i-1));
+   od;
+  fi; 
+od;
+
+A:=DiagonalMat(D);
+
+return A;
+end;
+
+############################################################################
+Elementary2GroupDegreeN:=function(n)
+local g,h,H,i,j,c,c1,K,f,f1;
+
+g:=SymmetricGroup(n);
+h:=[];
+h[1]:=[];
+h[1][1]:=-1; 
+for i in [2..n] do
+  h[1][i]:=0;
+od;
+
+for i in [2..n] do 
+  h[i]:=[]; 
+  for j in [1..n] do 
+    if i=j then 
+      h[i][j]:=1;
+    else
+      h[i][j]:=0;
+    fi;
+  od; 
+od; 
+H:=[];
+
+H[1]:=h;
+
+f:=[];
+for j in [1..(n-1)] do 
+  f[j]:=j+1;
+od; 
+f[n]:=1;
+
+f1:=Transformation(f);
+c:=AsPermutation(f1);
+
+for i in [2..n] do 
+  c1:=PermutationMat(c^(i-1),n);
+  H[i+1]:=c1*H[1]*c1^(-1);
+od;
+
+K:=Group(Elements(H));
+
+return K; 
+end;
+
+############################################################################
+WeylTestSetOfOrderKMatrices:=function(A,B)
+local n,A2,S,T,L0,i,C,S1,L,g,h,h1,A1,L1,L2,H,H1,s1,s2,k,l,t,W;
+
+n:=Length(A[1]);  
+L2:=0;
+if IsDiagonalMat(A) then 
+  S:=SymmetricGroup(n);
+  for g in S do 
+    h:=PermutationMat(g,n); 
+    A1:=h*A*h^(-1);
+    L:=Coefficients(B,A1);
+    if L<>fail then 
+      l:=Length(L);
+      t:=0;
+      for i in [1..l] do 
+        if not(L[i] in Rationals) then 
+          t:=1;
+        fi; 
+      od; 
+      if t=0 then 
+        L2:=L;
+        A2:=A1;
+        if ForAll(L2,IsInt) then 
+          break;
+        fi;  
+      fi;
+    fi; 
+  od;  
+else 
+  H:=Elementary2GroupDegreeN(n);
+  H1:=GeneratorsOfGroup(H);
+  S:=SymmetricGroup(n); 
+  S1:=GeneratorsOfGroup(S);
+  s1:=PermutationMat(S1[1],n);
+  s2:=PermutationMat(S1[2],n);
+  W:=Group(Union(H1,[s1,s2]));
+  for h in W do 
+    A1:=h*A*h^(-1);
+    L:=Coefficients(B,A1);
+    if not(L=fail) then
+      l:=Length(L);
+      t:=0;
+      for i in [1..l] do 
+        if not(L[i] in Rationals) then 
+          t:=1;
+        fi; 
+      od; 
+      if t=0 then 
+        L2:=L;
+        A2:=A1;
+        if ForAll(L2,IsInt) then 
+          break;
+        fi;  
+      fi;
+    fi; 
+  od;
+fi;
+
+return [A2,L2];
+end;#################################################################
+DiagonalTestSetOfOrderKMatrices:=function(G,I,B,A)
+local i,j,k,T,C,h,L2,A2,g,A1,Q,L,l,L1,t;
+
+k:=Order(A);
+T:=CharacterTable(G);
+C:=ConjugacyClasses(G);
+h:=Size(C);
+L2:=0;
+A2:=0;
+for j in [1..h] do 
+  g:=Representative(C[j]);
+  if IsInt(k/Order(g)) then 
+    for h in C[j] do 
+      Q:=Eigenvectors(CF(k),h); 
+      if Length(Q)=Length(A) then 
+        A1:=Q^(-1)*A*Q;
+        L:=Coefficients(B,A1);
+        if L <> fail then
+          l:=Length(L);
+          t:=0;
+          for i in [1..l] do 
+            if not(L[i] in Rationals) then 
+              t:=1;
+            fi; 
+          od; 
+          if t=0 then 
+            L2:=L;
+            A2:=A1;
+            if ForAll(L2,IsInt) then 
+              break;
+            fi;  
+          fi;
+        fi; 
+      fi;
+    od;
+  fi;
+od;
+
+return [A2,L2];
+end;
+
+#################################################################
+CentralIdempotentOfCGForChi:=function(G,chi)
+local m,R,c,C,e,g;
+
+m:=Exponent(G);
+R:=GroupRing(CF(m),G);
+c:=Identity(R);
+e:=0*c;
+C:=ConjugacyClasses(G);
+for g in Elements(G) do 
+  e:=e+chi[Position(C,ConjugacyClass(G,g^(-1)))]*(g*c);
+od; 
+e:=chi[1]/Size(G)*e;
+
+return e;
+end;
+#################################################################
+CentrallyPrimitiveIdempotentsOfCG:=function(G) 
+local n,m,T,C,F,h,e,R,c,cl,cc,coeff,g,chi,v,v1,v2;
+
+m:=Exponent(G);
+F:=CF(m);
+T:=CharacterTable(G);
+C:=ConjugacyClasses(T);
+h:=Size(C);
+R:=GroupRing(F,G);
+c:=Identity(R);
+
+#################################################################
+# constructs central idempotent for each chi 
+#################################################################
+e:=[];
+for n in [1..h] do 
+  chi:=Irr(T)[n];
+  coeff := chi[1]/Size(G);
+  v1:=[];
+  v2:=[];
+  for cl in C do
+    v := coeff*chi[ PositionProperty( C, cc -> Representative(cl)^-1 in cc ) ];
+    if v <> 0 then
+      for g in cl do
+        Add(v1,v);
+        Add(v2,g);
+      od;
+    fi;
+  od;
+  e[n]:=ElementOfMagmaRing(FamilyObj(c),0,v1,v2);
+od;
+
+return e;
+end;#################################################################
+# if e is any element of QG then this function determines a
+# subset of Ge that is a Z-basis of ZGe
+#################################################################
+ZBasisOfQGe:=function(G,e)
+local s,S,T,V1,n,g,F,L1,t,k,B,B2,B3,B4,b,i,V,j,j1,j2,h,L,h1,h2,H,v,d,d1,d2,r1,r2,m,S1,S2,H1;
+
+S:=[];
+for g in G do 
+  Add(S,g*e);
+od; 
+V:=VectorSpace(Rationals,S);
+n:=Dimension(V);
+
+T:=[S[1]];
+V1:=VectorSpace(Rationals,T);
+
+for s in S do 
+ #Print(Position(S,s),"\r");
+ if not(s in V1) then 
+   Add(T,s);
+   V1:=VectorSpace(Rationals,T);
+ fi; 
+od; 
+
+B2:=T;
+B3:=BasisNC(V,T); 
+
+for s in S do 
+  L:=Coefficients(B3,s);
+  if not ForAll(L,IsInt) then
+    # d1 is the largest demoninator
+    d1:=1;
+    S1:=[];
+    for j1 in [1..Size(B2)] do
+      if not(L[j1]=0) then 
+        d2:=DenominatorRat(L[j1]);
+        if d2>d1 then  
+          d1:=d2;
+        fi;
+      fi;
+    od;
+    # find positions having the largest denominator 
+    for j1 in [1..Size(B2)] do 
+      if DenominatorRat(L[j1])=d1 then 
+        Add(S1,j1);
+      fi;
+    od;
+    r1:=AbsoluteValue(NumeratorRat(L[S1[1]]));
+    S2:=[];
+    # find the last position of the smallest absolute value of the
+    # numerator among those having the largest denominator
+    for j1 in [1..Size(S1)] do  
+       r2:=AbsoluteValue(NumeratorRat(L[S1[j1]]));
+       if not(r2>r1) then 
+         Add(S2,S1[j1]); 
+       fi;
+    od; 
+    k:=S2[Size(S2)];
+    Remove(B2,k); 
+    Add(B2,s); 
+    B3:=BasisNC(V,B2);
+  fi;    
+od; 
+
+B:=B3;
+
+return B;
+end; 
+
+#################################################################
+SpectrumFromList:=function(L)
+local n,k,i,j,t,L1;
+
+n:=Sum(L);
+k:=Length(L);
+L1:=[];
+t:=0;
+for i in [1..k] do 
+  if L[i]>0 then 
+  for j in [1..L[i]] do 
+    t:=t+1;
+    L1[t]:=E(k)^(i-1);
+  od; 
+  fi; 
+od; 
+
+return L1;
+end;
+#################################################################
+# The next function is the main unit construction function
+#################################################################
+UnitForPAList:=function(G,k,V)
+local m,m1,F,C,h,R,s,t,c,Q,u,u1,e,n,i,j,M0,x,y,B0,B1,chi,L0,L1,L2,L,I,g,g1,g2,
+B,A,l,A1,A2,l1,S,T,U, T1,pos, pos2, charord, maxlen;
+
+m:=Exponent(G);
+F:=CF(m);
+T1:=CharacterTable(G);
+C:=ConjugacyClasses(T1);
+h:=Size(C);
+R:=GroupRing(F,G);
+c:=Identity(R);
+l:=Length(V[1]);
+M0:=[];
+I:=[];
+
+S:=[]; # S[n] is a lists of "locally" good elements for \chi_n
+T:=[]; # list of "universally" good element for all \chi_i 
+U:=[]; # U = [ g, [ list of indices ] ] denotes that the element g
+       # (which is plus or minus group element) works for all \chi_i 
+       # with i from the list of indices
+u:=[];
+
+# find the position of the trivial character
+pos:=PositionProperty(Irr(T1),j -> ForAll(ValuesOfClassFunction(j),IsOne));
+pos2:=[1..h];
+RemoveSet(pos2,pos);
+SortParallel( List( pos2, j -> DegreeOfCharacter(Irr(T1)[j])), pos2);
+charord:=Concatenation([pos],pos2);
+# now charord starts with the position of the trivial character
+# and then positions of other characters by acsending degree
+
+for n in [1..Length(charord)] do
+  chi:=Irr(G)[charord[n]];
+  S[n] := [];
+  # I:=IrreducibleRepresentationsDixon(G,chi); 
+  I[n]:=IrreducibleAffordingRepresentation(chi);
+  L1:=V[n];
+  A:=SpectrumFromList(L1);
+  for i in [ 1 .. NrConjugacyClasses(G) ] do 
+    g:=Image(I[n],Representative(C[i])); # image of the i-th class representative
+    m1:=Order(g);
+    # positive part
+    if IsDiagonalMat(g) then 
+      g2:=DiagonalOfMat(g); 
+    else
+      Q:=Eigenvectors(CF(m1),g);
+      g1:=Q*g*Q^(-1);
+      g2:=DiagonalOfMat(g1);
+    fi;
+    A1:=SortedList(A);
+    for j in [1..Length(g2)] do 
+      t:=Position(A1,g2[j]); 
+      if not(t=fail) then 
+        Remove(A1,t); 
+      fi;
+    od; 
+    if A1=[] then # g_i worked for chi_n
+    #  Print(n," ",Representative(C[i]),"\n");
+      Add( S[n], Representative(C[i])*c );
+      # u[n]:=Representative(C[i])*c;
+      RemoveSet(M0,n); 
+    else
+      # now negative part 
+      if IsDiagonalMat(g) then 
+        g2:=(-1)*DiagonalOfMat(g); 
+      else
+        Q:=Eigenvectors(CF(m1),g);
+        g1:=Q*g*Q^(-1);
+        g2:=(-1)*DiagonalOfMat(g1);
+      fi;
+      A1:=SortedList(A);
+      for j in [1..Length(g2)] do 
+        t:=Position(A1,g2[j]);
+        if t <> fail then 
+          Remove(A1,t);
+        fi;
+      od; 
+      if A1=[] then # -g_i worked for chi_n
+      #  Print(n," ",(-1)*(Representative(C[i])*c),"\n");
+        Add( S[n], -(Representative(C[i])*c) );
+        # u[n]:=(-1)*(Representative(C[i])*c);
+        RemoveSet(M0,n);
+      fi;
+    fi;
+    
+    if Length(S[n])=0 then
+      AddSet( M0, n );
+    else 
+      # create entries for U for each element in S[i]
+      # Print("S[",n,"]=",S[n], "\n");
+      for s in S[n] do
+        pos:=PositionProperty( U, y -> y[1]=s );
+        if pos = fail then
+          Add( U, [ s, [n] ] );
+        else
+          AddSet( U[pos][2], n );
+        fi;
+      od;
+      # construct u[n]
+      # pick element of which is good for the largest number of chi_n 
+      maxlen:=0;
+      pos:=0;
+      for j in [1..Length(U)] do
+        if Length(U[j][2]) >= maxlen and i in U[j][2] then
+          maxlen := Length(U[j][2]);
+          pos := j;
+        fi;
+      od;
+      if pos > 0 then
+        # Print("U[",pos,"]", U[pos], "\n");
+        for j in U[pos][2] do
+          u[j] := U[pos][1];
+        od;  
+      fi;
+    fi;
+  od; # loop over i
+#Print("UnitForPAList: ", n, " done with M0=", M0, "\n");
+od; # loop over n
+
+if Size(M0)>1 then 
+  for n in M0 do 
+    chi:=Irr(G)[charord[n]];
+    L1:=V[n];
+    # I:=IrreducibleRepresentationsDixon(G,chi);
+    B0:=QBasisOfImageOfIrrepOfG(G,I[n],chi);
+    # B:=ZBasisOfImageOfIrrepOfG(G,I,B0);
+    B:=ZBasisOfImageOfChi(G,I[n],B0);
+    A:=OrderKFactoredCompanionMatrixFromSpectrum(L1);
+    L:=Coefficients(B[2],A); 
+    if L=fail then 
+      A:=OrderKDiagonalMatrixFromSpectrum(L1);
+      L:=Coefficients(B[2],A); 
+    fi; 
+    u[n]:=[];
+    if L <> fail then 
+      l1:=Length(L);
+      u1:=[];
+      u[n]:=0*c;
+      for i in [1..l1] do 
+        u1[2*i-1]:=B[1][i]; 
+        u1[2*i]:=L[i];
+        u[n]:=u[n]+L[i]*(B[1][i]*c);
+      od;
+#      Print(n, u1,"\n"); 
+    else
+      # Print(n," complex","\n"); 
+      F:=FieldOfRealization(I[n]); 
+      B1:=BasisSubsetOfSpanningSet(F,B);
+      A:=OrderKFactoredCompanionMatrixFromSpectrum(L1);
+      L:=Coefficients(B1[2],A);
+      if L <> fail then 
+        l1:=Length(L);
+        u1:=[];
+        u[n]:=0*c;
+        for i in [1..l1] do 
+          u1[2*i-1]:=B1[1][i]; 
+          u1[2*i]:=L[i];
+          u[n]:=u[n]+L[i]*(B1[1][i]*c);
+        od;
+#        Print(n, u1,"\n");
+      fi;
+    fi;
+  od;
+fi;
+
+return u;
+end;
+################################################################
+UnitForChiPieceOfPAList:=function(G,k,chi,V1)
+local m,m1,F,C,h,R,t,t0,c,Q,u,u1,e,n,i,j,M0,x,B0,B1,L0,L1,L2,L,I,g,g1,g2,B,A,l,A1,A2,l1;
+
+m:=Exponent(G);
+F:=CF(m);
+C:=ConjugacyClasses(G);
+h:=Size(C);
+R:=GroupRing(F,G);
+c:=Identity(R);
+l:=Length(V1);
+
+u:=[];
+#  chi:=Irr(G)[n];
+#  I:=IrreducibleRepresentationsDixon(G,chi); 
+I:=IrreducibleAffordingRepresentation(chi);
+L1:=V1;
+A:=SpectrumFromList(L1);
+i:=0;
+t0:=0;
+while t0=0 and i<h do
+  i:=i+1;
+  Info(InfoTorsion, 1, "Processing conjugacy class number ", i, " of ", h); 
+  g:=Image(I,Representative(C[i]));
+  m1:=Order(g);
+  if IsDiagonalMat(g) then 
+    g2:=DiagonalOfMat(g); 
+  else
+    Q:=Eigenvectors(CF(m1),g);
+    g1:=Q*g*Q^(-1);
+    g2:=DiagonalOfMat(g1);
+  fi;
+  A1:=SortedList(A);
+  # remove (one by one) elements of the diagonal of the matrix from spectrum
+  for j in [1..Length(g2)] do 
+    t:=Position(A1,g2[j]); 
+    if t <> fail then 
+       Remove(A1,t); 
+    fi;
+  od; 
+  if A1=[] then
+    u[1]:=Representative(C[i])*c;
+    Print( u[1], "\n" );
+    t0:=1;
+  else
+    if IsDiagonalMat(g) then 
+      g2:=-DiagonalOfMat(g); 
+    else
+      g2:=-DiagonalOfMat(g1);
+    fi;
+    A1:=SortedList(A);
+    for j in [1..Length(g2)] do 
+      t:=Position(A1,g2[j]);
+      if not(t=fail) then 
+        Remove(A1,t);
+      fi;
+    od; 
+    if A1=[] then 
+      u[1]:=(-1)*(Representative(C[i])*c);
+      Print( u[1], "\n" );
+      t0:=1; 
+    fi;
+  fi;
+od;
+Print("UnitForChiPieceOfPAList: Step 1 done","\n");
+
+if t0=0 then 
+  # chi:=Irr(G)[n];
+  # L1:=V1;
+  g:=Elements(G); 
+  # I:=IrreducibleRepresentationsDixon(G,chi);
+  # I:=IrreducibleAffordingRepresentation(chi);
+  B0:=QBasisOfImageOfIrrepOfG(G,I,chi);
+  # B:=ZBasisOfImageOfIrrepOfG(G,I,B0);
+  B:=ZBasisOfImageOfChi(G,I,B0);
+  A:=OrderKFactoredCompanionMatrixFromSpectrum(L1);
+  L:=Coefficients(B[2],A); 
+  if L=fail then 
+    A:=OrderKDiagonalMatrixFromSpectrum(L1);
+    L:=Coefficients(B[2],A); 
+  fi; 
+  if L <> fail then 
+    l1:=Length(L);
+    u1:=[];
+    u[1]:=0*c;
+    for i in [1..l1] do 
+      u1[2*i-1]:=g[B[1][i]]; 
+      u1[2*i]:=L[i];
+      u[1]:=u[1]+L[i]*(g[B[1][i]]*c);
+    od;
+    Print(u1,"\n"); 
+  else
+    # Print(n," complex","\n"); 
+    F:=FieldOfRealization(I); 
+    B1:=BasisSubsetOfSpanningSet(F,B);
+    A:=OrderKFactoredCompanionMatrixFromSpectrum(L1);
+    L:=Coefficients(B1[2],A);
+    if L <> fail then 
+      l1:=Length(L);
+      u1:=[];
+      u[1]:=0*c;
+      for i in [1..l1] do 
+        u1[2*i-1]:=g[B1[1][i]]; 
+        u1[2*i]:=L[i];
+        u[1]:=u[1]+L[i]*(g[B1[1][i]]*c);
+      od;
+      Print(u1,"\n");
+    fi;
+  fi;
+fi;
+# TODO: Avoid recalculating u[1] at each iteration - it should be 
+# assembled from u1 at the end before returning  
+return u;
+end;
+#################################################################
+ConstructUnitFromChiPieces:=function(G,u)
+local m,C,F,h,e,R,n,c,cl,cc,coeff,g,chi,u1,i,u2,v,v1,v2, T,pos,pos2,charord;
+
+m:=Exponent(G);
+F:=CF(m);
+T:=CharacterTable(G);
+C:=ConjugacyClasses(T);
+h:=Size(C);
+
+# find the position of the trivial character
+pos:=PositionProperty(Irr(T),j -> ForAll(ValuesOfClassFunction(j),IsOne));
+pos2:=[1..h];
+RemoveSet(pos2,pos);
+SortParallel( List( pos2, j -> DegreeOfCharacter(Irr(T)[j])), pos2);
+charord:=Concatenation([pos],pos2);
+# now charord starts with the position of the trivial character
+# and then positions of other characters by acsending degree
+
+R:=GroupRing(F,G);
+c:=Identity(R);
+
+#################################################################
+# The next function constructs central idempotents for each chi 
+################################################################
+e:=[];
+for n in [1..Length(Irr(T))] do 
+  chi:=Irr(T)[charord[n]];
+  coeff := chi[1]/Size(G);
+  v1:=[];
+  v2:=[];
+  for cl in C do
+    v := coeff*chi[ PositionProperty( C, cc -> Representative(cl)^-1 in cc ) ];
+    if v <> 0 then
+      for g in cl do
+        Add(v1,v);
+        Add(v2,g);
+      od;
+    fi;
+  od;
+  e[n]:=ElementOfMagmaRing(FamilyObj(c),0,v1,v2);
+od;
+
+#Print("centrally primitive idempotents constructed","\n");
+
+v:=[];
+for n in [1..h] do 
+  v[n]:=CoefficientsAndMagmaElements(u[n]); 
+od; 
+
+u1:=[];
+for n in [1..h] do 
+  u1[n]:=0*e[n];
+  for i in [1..Length(v[n])/2] do     
+    u1[n]:=u1[n]+v[n][2*i]*(v[n][2*i-1]*e[n]);
+  od;
+od;
+
+u2:=0*c;
+for n in [1..h] do 
+  u2:=u2+u1[n]; 
+od; 
+
+return u2;
+end;
+
+#################################################################
+PartialAugmentation:=function(G,l,u1)
+local T,u,x,a,i; 
+
+T:=CharacterTable(G);
+u:=CoefficientsAndMagmaElements(u1);
+x:=List(ConjugacyClasses(T),Representative)[l];
+a:=0;
+for i in [1..Length(u)/2] do; 
+  if IsConjugate(G,x,u[2*i-1]) then 
+    a:=a+u[2*i];
+  fi; 
+od; 
+
+return a; 
+end; 
+
+#################################################################
+PartialAugmentationsOfU:=function(G,u1)
+local i,h,L,a;
+
+h:=Size(ConjugacyClasses(G));
+L:=[];
+for i in [1..h] do 
+  a:=PartialAugmentation(G,i,u1);
+  Add(L,a);
+od; 
+
+return L;
+end;
+##############################################################
+# The next function translates the output of HeLP package 
+# to prepare it for the partially central check
+##############################################################
+TranslatePAForPartiallyCentral := function(C, k, PA)
+local R, chi;
+R := [ ];
+for chi in Irr(C) do
+  Add(R, HeLP_MultiplicitiesOfEigenvalues(chi, k, PA));
+od;
+return R;
+end;
+
+
+#########################################################
+# Part 3(c): The next function performs the partially central 
+# check on a unit that is constructed from spectrum information 
+# given in the format of ZCForGOrderK.data output
+#########################################################
+IsPartiallyCentralUnit:=function(G,V)
+local k,u,u1,u2,J,K,e,e1,i,u3,B,C,c,t1;
+
+k:=Length(V[1]);
+u:=UnitForPAList(G,k,V);
+u1:=ConstructUnitFromChiPieces(G,u);
+u2:=CoefficientsAndMagmaElements(u1);
+
+J:=Irr(G);
+K:=[]; 
+e:=CentrallyPrimitiveIdempotentsOfCG(G);
+for i in [1..Length(J)] do 
+  if J[i][1] in V[i] then 
+     Add(K,i);
+  fi; 
+od;
+e1:=0*e[1];
+for k in K do e1:=e1+e[k]; od; 
+
+u3:=0*e1;
+for i in [1..((1/2)*Length(u2))] do
+  u3:=u3+u2[-1+2*i]*(u2[2*i]*e1); 
+od; 
+
+B:=ZBasisOfQGe(G,e1); 
+
+C:=Coefficients(B,u3);
+#Print("\n",C,"\n"); 
+
+if ForAll(C,IsInt) then 
+   c:="Not Partially Central"; t1:=false;
+else
+   c:="Unit is Partially Central"; t1:=true;
+fi; 
+#Print(c,"\n"); 
+
+return t1;
+end;  
+#############################################################
+# Part 4.  The Main Function that applies sieves, HeLP+, the 
+# quotient method, and partially central method to all groups 
+# of a given order n.
+#############################################################
+FindZCCriticalGroups := function(n)
+local Res, L, L2, L3, z, i, G, LC, foundtable, name, C, l, e, d, t, r, res, Trans, ro, sp, V, T, HeLP_solOrbs, QuotOrbs;
+
+Res := [ ];
+L := BadCasesForZC(n); # Find groups not covered by theoretical results
+if L = [ ] then # Check, if everything covered by theoretical results
+    Print("Groups of order ", n, " can be handled by theoretical results already. \n");
+else # Apply HeLP+ for the critical groups
+  Print("There are ", Size(L), " groups of order ", n, " not covered by theoretical results. \n");
+  L2 := [ ];
+  z := 0;
+  for i in [1..Size(L)] do
+#    Print(i, "\n");
+    z := z + 1;
+    if z mod 20 = 0 then
+      Print("I am testing group ", i, " of ", Size(L), ".\n");
+    fi;
+    G := SmallGroup(n, L[i]);
+    C := CharacterTable(G);
+    if not HeLPWithSolverChange(G) then # HeLPWithSolverChange usually works faster than just HeLP_ZC
+      if IsSolvable(G) then
+        T := TranslateHeLP_solToOrbits(C, HeLP_sol);
+        Add(L2, [L[i], T]);
+      else  # Workraround to apply modular HeLP to non-sovlable groups 
+        LC := AllCharacterTableNames(Size, n);
+        foundtable := false;
+        for name in LC do
+          if AtlasGroup(name) <> fail then
+            if IdGroup(AtlasGroup(name)) = [n, L[i]] then  # Look for table of the group in the Character Table Library
+              C := CharacterTable(name);
+              foundtable := true;
+              if not HeLP_ZC(C) then
+                T := TranslateHeLP_solToOrbits(C, HeLP_sol);
+                Add(L2, [L[i], T]);
+              fi;
+              break;
+            fi;
+          fi;
+        od;
+        if not foundtable then
+          T := TranslateHeLP_solToOrbits(C, HeLP_sol);
+          Add(L2, [L[i], T]);
+        fi;
+      fi;     
+    fi;
+  od;
+  if L2 = [ ] then # Check, if everything covered by HeLP+
+    Print("All ", Size(L), " groups of order ", n, " which could not be handled by theoretical results can be solved with HeLP+. \n");
+  else # Apply quotient method to groups surviving HeLP+
+    Print("There are ", Size(L2), " groups of order ", n, " surviving HeLP+. \n");
+    L3 := [ ];
+    for l in L2 do
+      G := SmallGroup(n, l[1]);
+      C := CharacterTable(G);
+#      HeLP_WithGivenOrder(C, 1);
+      HeLP_solOrbs := l[2];
+#      s := HeLP_sol;
+      e := Exponent(G);
+      for d in DivisorsInt(e) do
+        if IsBound(HeLP_solOrbs[d]) then
+          for i in [1..Size(HeLP_solOrbs[d])] do
+            if not IsSubset([0,1], Set(Flat(HeLP_solOrbs[d][i]))) then # Check, if the solution is trivial
+              t := TranslatePAForQuotientMethod(C, d, HeLP_solOrbs[d][i]); # Translate PA to the form used in quotient method program
+              if QuotientMethod(G, [t]) then  
+                Unbind(HeLP_solOrbs[d][i]);
+              fi;
+            fi;
+          od;
+          HeLP_solOrbs[d] := DuplicateFreeList(HeLP_solOrbs[d]);
+        fi;
+      od;
+      res := IsSubset([0,1], Set(Flat(HeLP_solOrbs)));
+      if not res then
+        Add(L3, [l[1], HeLP_solOrbs]);
+      fi; 
+    od;
+    if L3 = [ ] then # Check, if quotient method is sufficient
+      Print("All ", Size(L2), " groups of order ", n, " which made it through HeLP+ can be handled by the quotient method. \n");  
+    else
+      Print("There are ", Size(L3), " groups of order ", n, " surviving the quotient method. \n");
+      Trans := [ ];
+      for r in L3 do # Translate for usage of partially central construction
+        G := SmallGroup(n, r[1]);
+        QuotOrbs := r[2];
+        C := CharacterTable(G);  
+        e := Exponent(G);
+        for d in DivisorsInt(e) do
+          if IsBound(QuotOrbs[d]) then
+            if not IsSubset([0,1], Set(Flat(QuotOrbs[d]))) then
+              for i in [1..Size(QuotOrbs[d])] do
+                if not IsSubset([0,1], Set(Flat(QuotOrbs[d][i]))) then
+                  sp := TranslatePAForPartiallyCentral(C, d, QuotOrbs[d][i]);
+                  Add(Trans, [r[1], d, sp, QuotOrbs[d][i]]);
+                fi;
+              od; 
+            fi;
+          fi;   
+        od;
+      od;
+#      ResPartCen := [ ];
+      z := 0;
+      for t in Trans do
+        z := z +1;
+        if z mod 10 = 0 then
+          Print("Finished step", z, "of", Size(t), ".\n");
+        fi;
+        G := SmallGroup(n, t[1]);
+        V := t[3];
+        if not IsPartiallyCentralUnit(G, V) then
+          Add(Res, [t[1], t[2], t[4]]);
+        fi;
+      od;
+      if Res = [ ] then # Check, if Partially central construction suffices
+        Print("All remaining groups could be handled using the partially central construction.\n");
+      else
+        return Res;
+      fi;
+    fi;
+  fi;
+fi;  
+return Res;
+end;
